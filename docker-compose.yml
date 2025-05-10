@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+
+  nordvpn:
+    build: ./nordvpn
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - NORDVPN_USERNAME=${NORDVPN_USERNAME}
+      - NORDVPN_PASSWORD=${NORDVPN_PASSWORD}
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    restart: always
+    devices:
+      - /dev/net/tun
+    privileged: true
+    networks:
+      - vpn
+    container_name: nordvpn_gateway
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    restart: always
+    networks:
+      - vpn
+      - lan
+    environment:
+      - DNS1=127.0.0.1#5053
+      - DNS2=no
+      - ServerIP=192.168.1.33
+      - WEBPASSWORD=${PIHOLE_PASS}
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80"
+    volumes:
+      - ./pihole/etc-pihole:/etc/pihole
+      - ./pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    depends_on:
+      - cloudflared
+
+  cloudflared:
+    image: visibilityspots/cloudflared
+    container_name: cloudflared
+    restart: always
+    networks:
+      - vpn
+    command: proxy-dns --port 5053 --upstream https://1.1.1.1/dns-query
+
+  ftp:
+    image: fauria/vsftpd
+    container_name: ftpserver
+    restart: always
+    ports:
+      - "21:21"
+      - "21000-21010:21000-21010"
+    environment:
+      - FTP_USER=ftpuser
+      - FTP_PASS=ftppassword
+      - PASV_ADDRESS=192.168.1.33
+      - PASV_MIN_PORT=21000
+      - PASV_MAX_PORT=21010
+    volumes:
+      - ./data/ftp:/home/vsftpd
+    networks:
+      - lan
+
+  backup:
+    build: ./backup
+    container_name: backup_service
+    volumes:
+      - /:/source:ro
+      - ./data/backups:/backup
+    networks:
+      - lan
+    entrypoint: ["bash", "/backup.sh"]
+
+networks:
+  vpn:
+  lan:
